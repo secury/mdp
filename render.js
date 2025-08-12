@@ -1,7 +1,7 @@
 // =======================
 // Config & Globals
 // =======================
-const GAMMA = 0.95;           // 할인율 (0<gamma<1)
+const GAMMA = 0.9;           // 할인율 (0<gamma<1)
 const A = 4;                  // numActions
 const SOFTMAX_TAU = 2500;     // 로컬 정책 softmax 온도
 const SOURCE_FLOW_RATE = 1.0; // 시작 노드 지속 유입(시각화용)
@@ -28,6 +28,16 @@ let controlledNode = null;
 let policyVersion = 0;        // 현재 정책 버전
 let currentDSA = null;        // 최신 d(s,a)
 let piCached = null;          // 최신 π
+
+
+let showQ = true;   // 엣지에 Q(s,a) 표시
+let showV = true;   // 노드 아래에 V(s) 표시
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'q' || e.key === 'Q') showQ = !showQ;
+  if (e.key === 'v' || e.key === 'V') showV = !showV;
+});
+
+
 
 // 크로스페이드 상태 (이전 정책→새 정책 부드럽게 전환)
 let xf = {
@@ -516,6 +526,43 @@ function setRandomPolicy() {
   policyVersion++;
 }
 
+function setGreedyPolicy() {
+  if (!mdpForGraph) return;
+
+  // (선택) 기존 크로스페이드 흐름과 맞추려면 유지
+  xf.oldVersion = policyVersion;
+  xf.t = 0; xf.active = true;
+  xf.lastDSA = currentDSA ? currentDSA.map(r => r.slice()) : null;
+
+  // 현재 π에서 Q^π 계산
+  const piNow = policyFromViz(nodes);
+  const [vNow, qNow] = policy_evaluation_mdp(mdpForGraph, piNow);
+
+  // argmax_a Q^π(s,a) (유효 액션만, self-loop 제외)
+  const S = mdpForGraph.numStates, A = mdpForGraph.numActions;
+  const piG = math.zeros([S, A]);
+
+  for (let s = 0; s < S; s++) {
+    let bestA = null, bestVal = -Infinity;
+    for (let a = 0; a < A; a++) {
+      const e = nodes[s].actions[a];
+      if (!e) continue;                       // 없는 액션 제외
+      if (e.target && e.target.id === s) continue; // self-loop 제외
+      const qsa = qNow[s][a];
+      if (qsa > bestVal) { bestVal = qsa; bestA = a; }
+    }
+    // 모든 유효 액션이 self-loop였거나 없으면: 있는 액션 중 하나 fallback
+    if (bestA === null) {
+      for (let a = 0; a < A; a++) if (nodes[s].actions[a]) { bestA = a; break; }
+    }
+    if (bestA !== null) piG[s][bestA] = 1;
+  }
+
+  // 화면 반영
+  applyPolicyToNodes(piG);
+  policyVersion++;
+}
+
 // DP(정책 반복)로 optimal policy 구해 반영 (결정적 π*)
 function setOptimalPolicy() {
   if (!mdpForGraph) return;
@@ -575,9 +622,11 @@ function setOptimalPolicy() {
 const btnUniform = document.getElementById('btnUniform');
 const btnOptimal = document.getElementById('btnOptimal');
 const btnRandom = document.getElementById('btnRandom');
+const btnGreedy = document.getElementById('btnGreedy');
 if (btnUniform) btnUniform.addEventListener('click', setUniformPolicy);
 if (btnOptimal) btnOptimal.addEventListener('click', setOptimalPolicy);
 if (btnRandom) btnRandom.addEventListener('click', setRandomPolicy);
+if (btnGreedy) btnGreedy.addEventListener('click', setGreedyPolicy);
 
 
 // =======================
@@ -665,6 +714,105 @@ function drawScoreLabel(text) {
   }
 }
 
+function roundRectPath(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y, x+w,y+h, r);
+  ctx.arcTo(x+w,y+h, x,y+h, r);
+  ctx.arcTo(x,y+h, x,y, r);
+  ctx.arcTo(x,y, x+w,y, r);
+  ctx.closePath();
+}
+
+// 시작 노드 근방(화살표 시작 쪽)에 Q(s,a) 라벨 표시
+function drawQOnEdges(Q){
+  if (!showQ || !Q) return;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${Math.max(11, nodeRadius*0.4)}px monospace`;
+
+  edges.forEach(e => {
+    const s = e.source.id, a = e.actionIndex;
+    const val = Q[s]?.[a];
+    if (val == null) return;
+
+    // 방향/법선
+    const sx = e.source.x, sy = e.source.y;
+    const tx = e.target.x, ty = e.target.y;
+    const dx = tx - sx, dy = ty - sy;
+    const L  = Math.hypot(dx, dy) || 1;
+    const ux = dx / L,  uy = dy / L;   // 단위 방향벡터
+    const nx = -uy,     ny = ux;       // 법선
+
+    // 소스 원 경계에서 조금 나간 지점 + 법선으로 살짝 띄우기
+    const along   = nodeRadius + Math.max(10, nodeRadius * 1); // 화살표 시작쪽
+    const normal  = Math.max(8, nodeRadius*0.5);
+
+    // 화면 중심에서 바깥쪽으로 밀어내기(겹침 감소용)
+    const cx = canvas.width/2, cy = canvas.height/2;
+    const sign = ((sx-cx)*nx + (sy-cy)*ny) >= 0 ? 1 : -1;
+
+    const px = sx + ux*along + nx*normal*sign;
+    const py = sy + uy*along + ny*normal*sign;
+
+    const text = val.toFixed(2);
+    const pad  = 4;
+    const tw   = ctx.measureText(text).width;
+    const th   = Math.max(14, nodeRadius*0.7);
+
+    // 배경 버블(반투명 어두운색)
+    // max Q action이면 파란색으로.
+    const maxQ = Math.max(...Q[s]);
+    const maxQAction = Q[s].indexOf(maxQ);
+    const isMaxQAction = a === maxQAction;
+    const color = isMaxQAction ? 'rgba(150,150,0,0.55)' : 'rgba(0,0,0,0.55)';
+    ctx.fillStyle = color;
+    roundRectPath(px - (tw/2 + pad), py - th/2, tw + pad*2, th, 6);
+    ctx.fill();
+
+    // 텍스트
+    ctx.fillStyle = 'white';
+    ctx.fillText(text, px, py + 0.5);
+  });
+
+  ctx.restore();
+}
+
+
+// 노드 아래에 V(s) 표시
+function drawVOnNodes(V){
+  if (!showV || !V) return;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${Math.max(11, nodeRadius*0.55)}px monospace`;
+
+  nodes.forEach(n => {
+    const val = V[n.id];
+    if (val == null) return;
+
+    const text = val.toFixed(2);
+    const pad  = 3;
+    const tw   = ctx.measureText(text).width;
+    const th   = Math.max(14, nodeRadius*0.7);
+    const x    = n.x;
+    const y    = n.y + nodeRadius + th*0.8;  // 노드 아래쪽에 배치
+
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    // roundRectPath(x - (tw/2 + pad), y - th/2, tw + pad*2, th, 6);
+    ctx.fill();
+
+    ctx.fillStyle = 'yellow';
+    ctx.fillText(text, x, y + 0.5);
+  });
+
+  ctx.restore();
+}
+
+
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -676,6 +824,9 @@ function animate() {
   piCached = pi;
   const res = computeExactD_and_Return(mdpForGraph, pi);
   currentDSA = res.dSA;
+
+  // ★ 현재 정책의 V, Q 계산 (policy_evaluation_mdp 사용)
+  const [v_now, q_now] = policy_evaluation_mdp(mdpForGraph, pi);
 
   // 블렌드된 d(s,a): d_blend = w_old*d_old + w_new*d_new
   let dSA = currentDSA;
@@ -759,6 +910,9 @@ function animate() {
     particles.forEach(p => p.draw());
   }
   nodes.forEach(n => n.draw());
+
+  // drawVOnNodes(v_now);
+  drawQOnEdges(q_now);
 
   // 6) 상단 점수
   ctx.textAlign = 'center';
