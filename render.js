@@ -13,6 +13,8 @@ const VISUAL_FLOOR = 0.1;    // 입자 시각 알파 하한 (이동 중 선명�
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
+let flowPaused = true;
+
 let nodes = [];
 let edges = [];
 let particles = [];
@@ -500,6 +502,20 @@ function setUniformPolicy() {
   policyVersion++;
 }
 
+function setRandomPolicy() {
+  if (!mdpForGraph) return;
+  const pi = math.zeros([mdpForGraph.numStates, mdpForGraph.numActions]);
+  for (let s = 0; s < mdpForGraph.numStates; s++) {
+    // 하나의 action을 선택한후 그 action의 확률 1로. 나머지는 0. 
+    const valid = [];
+    for (let a = 0; a < A; a++) if (nodes[s].actions[a]) valid.push(a);
+    const a = valid[Math.floor(Math.random() * valid.length)];
+    pi[s][a] = 1;
+  }
+  applyPolicyToNodes(pi);
+  policyVersion++;
+}
+
 // DP(정책 반복)로 optimal policy 구해 반영 (결정적 π*)
 function setOptimalPolicy() {
   if (!mdpForGraph) return;
@@ -558,13 +574,97 @@ function setOptimalPolicy() {
 // 버튼 클릭 핸들러
 const btnUniform = document.getElementById('btnUniform');
 const btnOptimal = document.getElementById('btnOptimal');
+const btnRandom = document.getElementById('btnRandom');
 if (btnUniform) btnUniform.addEventListener('click', setUniformPolicy);
 if (btnOptimal) btnOptimal.addEventListener('click', setOptimalPolicy);
+if (btnRandom) btnRandom.addEventListener('click', setRandomPolicy);
 
 
 // =======================
 // 메인 루프
 // =======================
+
+// --- Score FX state ---
+let lastJ = null;
+const scoreFx = { active:false, t:0, dur:550, delta:0, sparks:[] };
+
+// 라벨 이펙트 트리거 (증가면 초록, 감소면 빨강 느낌)
+function triggerScoreFx(delta, cx, y) {
+  scoreFx.active = true;
+  scoreFx.t = 0;
+  scoreFx.delta = delta;
+
+  // 작은 스파클들 생성
+  const N = 28;
+  scoreFx.sparks = Array.from({length:N}, () => {
+    const ang = Math.random()*Math.PI*2;
+    const spd = 1.2 + Math.random()*1.8;
+    return {
+      x: cx + (Math.random()-0.5)*30,
+      y: y + 12 + (Math.random()-0.5)*8,
+      vx: Math.cos(ang)*spd,
+      vy: Math.sin(ang)*spd - 0.6,
+      a: 1,  // alpha
+      r: 1 + Math.random()*1.5
+    };
+  });
+}
+
+function drawScoreLabel(text) {
+  const clamp01 = x => x<0?0 : x>1?1 : x;
+  const easeOutCubic = x => 1 - Math.pow(1-x, 3);
+
+  const cx = canvas.width/2, ty = 20;
+
+  // 진행도 0..1
+  let k = 0;
+  if (scoreFx.active) {
+    k = 1 - easeOutCubic(clamp01(scoreFx.t / scoreFx.dur)); // 1→0
+  }
+
+  // 팝/글로우 강도 (변화량 클수록 살짝 더 강하게)
+  const mag = 0.5;  //Math.min(1, Math.abs(scoreFx.delta) * 1);
+  const scale = 1 + 0.16 * k * mag;
+
+  // 색/그림자 (증가: 초록, 감소: 빨강)
+  const glow = scoreFx.delta >= 0 ? 'rgba(80,255,120,0.9)'
+                                  : 'rgba(255,80,80,0.9)';
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = '40px sans-serif';
+
+  // 글로우
+  if (scoreFx.active) {
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 20 + 40*k*mag;
+  }
+
+  // 스케일 팝
+  ctx.translate(cx, ty);
+  ctx.scale(scale, scale);
+
+  // 본문 텍스트
+  ctx.fillStyle = 'rgba(255,255,0,0.95)'; // 기본 노란색
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+
+  // 스파클 업데이트/그리기
+  if (scoreFx.active) {
+    const col = scoreFx.delta >= 0 ? 'rgba(80,255,120,' : 'rgba(255,80,80,';
+    for (const s of scoreFx.sparks) {
+      s.x += s.vx; s.y += s.vy; s.vy += 0.02; // 중력 약간
+      s.a *= 0.95;
+      if (s.a < 0.03) continue;
+      ctx.fillStyle = `${col}${(0.8*s.a).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    }
+    scoreFx.t += (typeof lastTs==='number' ? 16 : 16); // dt를 쓰고 있으면 그 값 사용
+    if (scoreFx.t >= scoreFx.dur) scoreFx.active = false;
+  }
+}
+
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -590,6 +690,16 @@ function animate() {
   for (let s = 0; s < mdpForGraph.numStates; s++)
     for (let a = 0; a < mdpForGraph.numActions; a++)
       J += dSA[s][a] * mdpForGraph.reward[s][a];
+
+  // --- J 변화 감지 후 트리거 ---
+  const J_now = J;                                // 방금 계산한 값
+  if (lastJ == null) lastJ = J_now;
+  const dJ = J_now - lastJ;
+  if (Math.abs(dJ) > 1e-2) {                      // 임계값(튜닝 가능)
+    const cx = canvas.width / 2, ty = 20;         // 라벨 위치
+    triggerScoreFx(dJ, cx, ty);
+  }
+  lastJ = J_now;
 
   // 2) 플로우(입자): 정책에 따라 방출, 도착 시 기여량에 γ^t 반영
   nodes.forEach(node => {
@@ -627,9 +737,7 @@ function animate() {
 
   // 4) Edge 렌더링: 선 굵기 = d^π(s,a), 화살표 크기 = π(a|s)
   edges.forEach(e => {
-    const prob = nodes[e.source.id].policyDistribution[e.actionIndex] || 0;  // π(a|s)
     const dsa  = dSA[e.source.id][e.actionIndex];                             // d^π(s,a)
-
     // (a) d^π 기반 굵은 라인
     if (dsa > 1e-4) {
       const flowLW   = Math.min(Math.log(1 + dsa) * 300, 50);                 // 굵기 스케일은 취향대로
@@ -637,7 +745,9 @@ function animate() {
       e.drawFlowLine(`rgba(255,255,255,${flowAlph})`, flowLW);
     }
 
-    // (b) π 기반 화살표(크기만 π에 비례)
+  });
+  edges.forEach(e => {
+    const prob = nodes[e.source.id].policyDistribution[e.actionIndex] || 0;  // π(a|s)
     if (prob > 1e-4) {
       const arrowLW = 5 + prob * 10;                 // 화살표 "크기" 조절 값
       e.drawArrowhead(`rgba(255,85,85,0.9)`, arrowLW);
@@ -645,7 +755,9 @@ function animate() {
   });
 
   // 5) 노드/입자
-  particles.forEach(p => p.draw());
+  if (!flowPaused) {
+    particles.forEach(p => p.draw());
+  }
   nodes.forEach(n => n.draw());
 
   // 6) 상단 점수
@@ -653,7 +765,8 @@ function animate() {
   ctx.textBaseline = 'top';
   ctx.font = '40px sans-serif';
   ctx.fillStyle = 'rgba(255,255,0,0.9)';
-  ctx.fillText(`R${rewardPresetId}: (Normalized) Expected Discounted Return: ${J.toFixed(2)}`, canvas.width / 2, 20);
+  drawScoreLabel(`R${rewardPresetId}: (Normalized) Expected Discounted Return: ${J.toFixed(2)}`);
+
 
   // 7) 크로스페이드 진행/종료
   if (xf.active) {
@@ -736,7 +849,7 @@ function init() {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   const { w, h } = setupCanvas();   // ← CSS px 기준
   nodes = []; edges = []; particles = [];
-  nodeRadius = Math.min(w, h) * 0.035;
+  nodeRadius = Math.min(w, h) * 0.045;
   const built = buildGraphForViz(w, h);
   nodes = built.nodes; edges = built.edges;
   mdpForGraph = buildMDPFromGraph(nodes, GAMMA);
@@ -769,3 +882,23 @@ window.addEventListener('resize', init);
 
 // 시작
 init();
+
+
+
+function updateFlowButton() {
+  const b = document.getElementById('btnFlow');
+  if (!b) return;
+  b.textContent = flowPaused ? 'Start flow' : 'Stop flow';
+}
+
+function toggleFlow() {
+  flowPaused = !flowPaused;
+  particles = [];
+  updateFlowButton();
+}
+
+// 버튼/스페이스바로 토글
+document.getElementById('btnFlow')?.addEventListener('click', toggleFlow);
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); toggleFlow(); }
+});
