@@ -32,10 +32,6 @@ let piCached = null;          // 최신 π
 
 let showQ = true;   // 엣지에 Q(s,a) 표시
 let showV = true;   // 노드 아래에 V(s) 표시
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'q' || e.key === 'Q') showQ = !showQ;
-  if (e.key === 'v' || e.key === 'V') showV = !showV;
-});
 
 
 
@@ -88,8 +84,8 @@ const stateRewards = rewardPresets[rewardPresetId].slice();
 
 // 보상 적용: stateRewards, 노드 라벨, mdpForGraph.reward 갱신
 function applyRewardPreset(presetKey) {
-  document.getElementById(`btnR${rewardPresetId}`).style.backgroundColor = '#444';
-  document.getElementById(`btnR${presetKey}`).style.backgroundColor = '#660';
+  document.getElementById(`btnR${rewardPresetId}`).classList.remove('selected');
+  document.getElementById(`btnR${presetKey}`).classList.add('selected');
 
   rewardPresetId = presetKey;
   const arr = rewardPresets[presetKey];
@@ -663,7 +659,7 @@ function drawScoreLabel(text) {
   const clamp01 = x => x<0?0 : x>1?1 : x;
   const easeOutCubic = x => 1 - Math.pow(1-x, 3);
 
-  const cx = canvas.width/2, ty = 20;
+  const cx = 0, ty = 10;
 
   // 진행도 0..1
   let k = 0;
@@ -680,7 +676,7 @@ function drawScoreLabel(text) {
                                   : 'rgba(255,80,80,0.9)';
 
   ctx.save();
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.font = '40px sans-serif';
 
@@ -919,7 +915,7 @@ function animate() {
   ctx.textBaseline = 'top';
   ctx.font = '40px sans-serif';
   ctx.fillStyle = 'rgba(255,255,0,0.9)';
-  drawScoreLabel(`R${rewardPresetId}: (Normalized) Expected Discounted Return: ${J.toFixed(2)}`);
+  drawScoreLabel(`R${rewardPresetId}: (Normalized) Expected Return: ${J.toFixed(2)}`);
 
 
   // 7) 크로스페이드 진행/종료
@@ -1042,17 +1038,40 @@ init();
 function updateFlowButton() {
   const b = document.getElementById('btnFlow');
   if (!b) return;
-  b.textContent = flowPaused ? 'Start flow' : 'Stop flow';
+  if (flowPaused) {
+    b.classList.remove('selected');
+  } else {
+    b.classList.add('selected');
+  }
 }
 
 function toggleFlow() {
   flowPaused = !flowPaused;
-  particles = [];
   updateFlowButton();
+  particles = [];
 }
 
-// 버튼/스페이스바로 토글
+function updateQButton() {
+  const b = document.getElementById('btnQ');
+  if (!b) return;
+  if (showQ) {
+    b.classList.add('selected');
+  } else {
+    b.classList.remove('selected');
+  }
+}
+
+function toggleQ() {
+  showQ = !showQ;
+  updateQButton();
+}
+
 document.getElementById('btnFlow')?.addEventListener('click', toggleFlow);
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') { e.preventDefault(); toggleFlow(); }
+  if (e.key === 'f' || e.key === 'F') toggleFlow();
+});
+
+document.getElementById('btnQ')?.addEventListener('click', toggleQ);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'q' || e.key === 'Q') toggleQ();
 });
