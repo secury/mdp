@@ -668,7 +668,7 @@ function drawScoreLabel(text) {
   }
 
   // 팝/글로우 강도 (변화량 클수록 살짝 더 강하게)
-  const mag = 0.5;  //Math.min(1, Math.abs(scoreFx.delta) * 1);
+  const mag = 0.3;  //Math.min(1, Math.abs(scoreFx.delta) * 1);
   const scale = 1 + 0.16 * k * mag;
 
   // 색/그림자 (증가: 초록, 감소: 빨강)
