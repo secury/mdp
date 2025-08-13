@@ -30,8 +30,8 @@ let currentDSA = null;        // 최신 d(s,a)
 let piCached = null;          // 최신 π
 
 
-let showQ = true;   // 엣지에 Q(s,a) 표시
-let showV = true;   // 노드 아래에 V(s) 표시
+let showQ = false;   // 엣지에 Q(s,a) 표시
+let showV = false;   // 노드 아래에 V(s) 표시
 
 
 

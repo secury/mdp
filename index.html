@@ -43,6 +43,10 @@
         <button id="btnRandom">Random</button>
         <button id="btnGreedy">Greedy(Q)</button>
         <button id="btnOptimal">Optimal</button>
+
+        <!-- <button id="recStart">Start Record</button>
+        <button id="recStop" disabled>Stop & Download</button> -->
+
     </div>      
 
     <canvas id="canvas"></canvas>
@@ -53,6 +57,38 @@
     </script>
     <script src="mdp.js"></script>
     <script src="render.js"></script>
-</body>
 
-</html>
+    <script>
+        let rec = null, recChunks = [];
+
+        function startRecord() {
+            const stream = canvas.captureStream(20); // 20 FPS 추천 (GIF면 15~20)
+            recChunks = [];
+            rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+            rec.ondataavailable = e => e.data.size && recChunks.push(e.data);
+            rec.onstop = () => {
+                const blob = new Blob(recChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'mdp.webm';
+                document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+            };
+            rec.start();
+            document.getElementById('recStart').disabled = true;
+            document.getElementById('recStop').disabled = false;
+        }
+
+        function stopRecord() {
+            if (rec && rec.state !== 'inactive') rec.stop();
+            document.getElementById('recStart').disabled = false;
+            document.getElementById('recStop').disabled = true;
+        }
+
+        document.getElementById('recStart')?.addEventListener('click', startRecord);
+        document.getElementById('recStop')?.addEventListener('click', stopRecord);
+
+    </script>
+    </body>
+    
+    </html>
