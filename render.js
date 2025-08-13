@@ -4,7 +4,7 @@
 const GAMMA = 0.9;           // 할인율 (0<gamma<1)
 const A = 4;                  // numActions
 const SOFTMAX_TAU = 2500;     // 로컬 정책 softmax 온도
-const SOURCE_FLOW_RATE = 1.0; // 시작 노드 지속 유입(시각화용)
+const SOURCE_FLOW_RATE = 2.0; // 시작 노드 지속 유입(시각화용)
 
 const POLICY_EPS = 1e-3;      // 정책 변화 감지 임계값
 const FADE_EPS = 1e-3;        // γ^t 페이드아웃 임계값 (기여량에만 사용)
